@@ -27,7 +27,7 @@ def transfer():
 
     alpha = request.form.get('alpha', 1.0)
 
-    content_filename = content_image.filename + '.jpg'
+    content_filename = content_image.filename
     content_path = os.path.join(UPLOAD_FOLDER, content_filename)
     style_path = os.path.join(STYLE_FOLDER, f'{style_name}.jpg')
 
@@ -53,8 +53,7 @@ def transfer():
     print(f"Running time: {running_time} seconds")
 
     response = {
-        'image': result_path,
-        'running_time': running_time
+        'image': result_path
     }
 
     return jsonify(response)
