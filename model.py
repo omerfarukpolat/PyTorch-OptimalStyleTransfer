@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from VGGencoder import Encoder
 from decoder import Decoder
 from feature_transformer import feature_transform
-
+import torch.quantization as quant
+import torch.utils.checkpoint as checkpoint
 
 class SingleLevelAE_OST(nn.Module):
     def __init__(self, level, pretrained_path_dir='models'):
@@ -12,14 +13,18 @@ class SingleLevelAE_OST(nn.Module):
         self.level = level
         self.encoder = Encoder(f'{pretrained_path_dir}/conv5_1.pth')
         self.decoder = Decoder(level, f'{pretrained_path_dir}/dec{level}_1.pth')
+        self.quant = quant.QuantStub()
+        self.dequant = quant.DeQuantStub()
 
     def forward(self, content_image, style_image, alpha):
+        content_image = self.quant(content_image)
+        style_image = self.quant(style_image)
         content_feature = self.encoder(content_image, f'relu{self.level}_1')
         style_feature = self.encoder(style_image, f'relu{self.level}_1')
         res = feature_transform(content_feature, style_feature, alpha)
         res = self.decoder(res)
+        res = self.dequant(res)
         return res
-    
 
 class MultiLevelAE_OST(nn.Module):
     def __init__(self, pretrained_path_dir='models'):
@@ -30,18 +35,22 @@ class MultiLevelAE_OST(nn.Module):
         self.decoder3 = Decoder(3, f'{pretrained_path_dir}/dec3_1.pth')
         self.decoder4 = Decoder(4, f'{pretrained_path_dir}/dec4_1.pth')
         self.decoder5 = Decoder(5, f'{pretrained_path_dir}/dec5_1.pth')
+        self.quant = quant.QuantStub()
+        self.dequant = quant.DeQuantStub()
 
     def transform_level(self, content_image, style_image, alpha, level):
-        content_feature = self.encoder(content_image, f'relu{level}_1')
-        style_feature = self.encoder(style_image, f'relu{level}_1')
+        content_feature = checkpoint.checkpoint(self.encoder, content_image, f'relu{level}_1')
+        style_feature = checkpoint.checkpoint(self.encoder, style_image, f'relu{level}_1')
         res = feature_transform(content_feature, style_feature, alpha)
-        return getattr(self, f'decoder{level}')(res)
+        return checkpoint.checkpoint(getattr(self, f'decoder{level}'), res)
 
     def forward(self, content_image, style_image, alpha=1):
+        content_image = self.quant(content_image)
+        style_image = self.quant(style_image)
         r5 = self.transform_level(content_image, style_image, alpha, 5)
         r4 = self.transform_level(r5, style_image, alpha, 4)
         r3 = self.transform_level(r4, style_image, alpha, 3)
         r2 = self.transform_level(r3, style_image, alpha, 2)
         r1 = self.transform_level(r2, style_image, alpha, 1)
-
+        r1 = self.dequant(r1)
         return r1
